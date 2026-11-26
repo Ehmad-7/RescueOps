@@ -1,47 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ACTIVE_STATUSES, ApiError, api, errorMessage, type Health, type Run, type Scenario } from "@/lib/api";
+import { ACTIVE_STATUSES, ApiError, api, errorMessage, mergeRun, type HealthState, type Run, type Scenario } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
-import LaunchPanel from "./LaunchPanel";
-import RunSummary from "./RunSummary";
-import Timeline from "./Timeline";
+import AppHeader from "./AppHeader";
+import LaunchView from "./launch/LaunchView";
+import RunWorkspace from "./run/RunWorkspace";
 
 const POLL_MS = 1500; // authoritative status refresh while the live stream is not open
 const POLL_LIVE_MS = 4000; // slower fallback refresh while SSE is delivering events
 const POLL_MAX_MS = 8000;
 
-/** Polling responses can arrive out of order: a run never goes from terminal back to active. */
-function mergeRun(prev: Run | null, next: Run): Run | null {
-  if (prev && prev.id !== next.id) return prev; // response for a previous run
-  if (prev && !ACTIVE_STATUSES.includes(prev.status) && ACTIVE_STATUSES.includes(next.status)) return prev;
-  return next;
-}
-
-type HealthState = { kind: "loading" } | { kind: "ok"; health: Health } | { kind: "error"; message: string };
-
-function BackendStatus({ state }: { state: HealthState }) {
-  const [dot, text] =
-    state.kind === "loading"
-      ? ["bg-ink-faint animate-pulse", "Connecting…"]
-      : state.kind === "error"
-        ? ["bg-bad", "Backend unreachable"]
-        : state.health.gemini_configured
-          ? ["bg-ok", state.health.model]
-          : ["bg-warn", "Gemini key not configured"];
-  return (
-    <div role="status" className="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 font-mono text-xs text-ink-muted">
-      <span aria-hidden className={`size-1.5 rounded-full ${dot}`} />
-      <span className="sr-only">Backend status: </span>
-      <span className="max-w-[40vw] truncate">{text}</span>
-    </div>
-  );
-}
+const fetchBackend = () => Promise.allSettled([api.health(), api.scenarios()]);
+type BackendResult = Awaited<ReturnType<typeof fetchBackend>>;
 
 export default function Dashboard() {
   const [health, setHealth] = useState<HealthState>({ kind: "loading" });
   const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
   const [scenariosError, setScenariosError] = useState<string | null>(null);
+  const [goal, setGoal] = useState("");
+  const [scenario, setScenario] = useState<string | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
@@ -49,40 +27,32 @@ export default function Dashboard() {
   const [runLost, setRunLost] = useState(false); // backend no longer knows the run (restart)
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const launchingRef = useRef(false); // synchronous guard: one POST /runs at a time
 
-  // Retry re-checks health too: otherwise launch stays blocked after the backend recovers.
-  const reconnect = useCallback(async () => {
-    setScenariosError(null);
-    setScenarios(null);
-    setHealth({ kind: "loading" });
-    const [h, sc] = await Promise.allSettled([api.health(), api.scenarios()]);
+  // Health + scenarios: fetched together on mount and on every Retry (Retry must re-check health
+  // too, otherwise launch stays blocked after the backend recovers).
+  const applyBackend = useCallback(([h, sc]: BackendResult) => {
     setHealth(h.status === "fulfilled" ? { kind: "ok", health: h.value } : { kind: "error", message: errorMessage(h.reason) });
     if (sc.status === "fulfilled") setScenarios(sc.value);
     else setScenariosError(errorMessage(sc.reason));
   }, []);
 
+  const reconnect = useCallback(() => {
+    setScenariosError(null);
+    setScenarios(null);
+    setHealth({ kind: "loading" });
+    fetchBackend().then(applyBackend);
+  }, [applyBackend]);
+
   useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        const h = await api.health();
-        if (alive) setHealth({ kind: "ok", health: h });
-      } catch (err) {
-        if (alive) setHealth({ kind: "error", message: errorMessage(err) });
-      }
-    })();
-    (async () => {
-      try {
-        const s = await api.scenarios();
-        if (alive) setScenarios(s);
-      } catch (err) {
-        if (alive) setScenariosError(errorMessage(err));
-      }
-    })();
+    fetchBackend().then((r) => {
+      if (alive) applyBackend(r);
+    });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [applyBackend]);
 
   const runId = run?.id ?? null;
   const runActive = run && !runLost ? ACTIVE_STATUSES.includes(run.status) : false;
@@ -135,21 +105,25 @@ export default function Dashboard() {
     };
   }, [runId, runActive]);
 
-  async function launch(goal: string, scenario: string) {
+  async function launch() {
+    const sc = scenario ?? scenarios?.[0]?.id;
+    if (!sc || launchingRef.current) return;
+    launchingRef.current = true;
     setLaunching(true);
     setLaunchError(null);
     setPollError(null);
     setRunLost(false);
     setCancelError(null);
     try {
-      setRun(await api.createRun(goal, scenario));
+      const created = await api.createRun(goal.trim(), sc);
+      setRun(created);
+      window.scrollTo({ top: 0 });
     } catch (err) {
       setLaunchError(
-        err instanceof ApiError && err.status === 429
-          ? `The agent is busy: ${err.message}`
-          : errorMessage(err),
+        err instanceof ApiError && err.status === 429 ? `The agent is busy: ${err.message}` : errorMessage(err),
       );
     } finally {
+      launchingRef.current = false;
       setLaunching(false);
     }
   }
@@ -174,70 +148,51 @@ export default function Dashboard() {
     }
   }
 
-  const canLaunch = health.kind === "ok" && health.health.gemini_configured;
-  const busy = runActive;
+  // Back to the launch view (only offered once the run is no longer active). Inputs are kept.
+  function startNew() {
+    setRun(null);
+    setRunLost(false);
+    setPollError(null);
+    setCancelError(null);
+    setLaunchError(null);
+    window.scrollTo({ top: 0 });
+  }
 
   return (
-    <div className="console-grid min-h-screen">
-      <header className="sticky top-0 z-10 border-b border-line bg-canvas/85 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <div aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/40 bg-accent/10 font-mono text-sm font-semibold text-accent">
-              R
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold tracking-tight text-ink">RescueOps</h1>
-              <p className="truncate text-xs text-ink-faint">Autonomous DevOps Recovery Agent</p>
-            </div>
-          </div>
-          <BackendStatus state={health} />
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
-        {health.kind === "error" && (
-          <div role="alert" className="mb-6 rounded-lg border border-bad/30 bg-bad/5 px-4 py-3 text-sm text-bad">
-            {health.message} Check that the API is running and <code className="font-mono">NEXT_PUBLIC_API_URL</code> points to it.
-          </div>
+    <div className="min-h-screen">
+      <AppHeader health={health} degraded={!!pollError && !runLost} context={run ? `Recovery ${run.id}` : "New recovery"} />
+      <main className="mx-auto w-full max-w-[90rem] px-4 pt-6 pb-16 sm:px-6 lg:pt-8">
+        {run ? (
+          <RunWorkspace
+            key={run.id}
+            run={run}
+            scenarios={scenarios}
+            health={health}
+            timeline={timeline}
+            connection={connection}
+            lost={runLost}
+            pollError={pollError}
+            cancelling={cancelling}
+            cancelError={cancelError}
+            onCancel={cancel}
+            onRetryStream={retry}
+            onNewRun={startNew}
+          />
+        ) : (
+          <LaunchView
+            health={health}
+            scenarios={scenarios}
+            scenariosError={scenariosError}
+            goal={goal}
+            onGoalChange={setGoal}
+            scenario={scenario}
+            onScenarioChange={setScenario}
+            launching={launching}
+            launchError={launchError}
+            onLaunch={launch}
+            onReconnect={reconnect}
+          />
         )}
-        {health.kind === "ok" && !health.health.gemini_configured && (
-          <div role="alert" className="mb-6 rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 text-sm text-warn">
-            The backend has no Gemini API key configured, so runs cannot start.
-          </div>
-        )}
-
-        {/* DOM order (mobile): launch, summary, timeline. Desktop: summary spans both rows on the right. */}
-        <div className="grid gap-6 lg:grid-cols-12">
-          <div className="min-w-0 lg:col-span-7">
-            <LaunchPanel
-              scenarios={scenarios}
-              scenariosError={scenariosError}
-              onRetryScenarios={reconnect}
-              launching={launching}
-              launchError={launchError}
-              busy={busy}
-              canLaunch={canLaunch}
-              onLaunch={launch}
-            />
-          </div>
-          <div className="min-w-0 lg:col-span-5 lg:col-start-8 lg:row-span-2 lg:row-start-1">
-            <RunSummary
-              run={run}
-              livePlan={timeline.plan}
-              liveEventCount={timeline.eventCount}
-              lost={runLost}
-              pollError={pollError}
-              cancelling={cancelling}
-              cancelError={cancelError}
-              onCancel={cancel}
-            />
-          </div>
-          {run && (
-            <div className="min-w-0 lg:col-span-7">
-              <Timeline key={run.id} timeline={timeline} connection={connection} lost={runLost} onRetry={retry} />
-            </div>
-          )}
-        </div>
       </main>
     </div>
   );

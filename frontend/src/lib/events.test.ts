@@ -8,7 +8,6 @@ import {
   parseEvent,
   reportsFailure,
   runningTools,
-  summarizeArgs,
   type AgentEvent,
   type EventType,
 } from "./events.ts";
@@ -172,12 +171,7 @@ test("untrusted text is kept verbatim as data (rendered as text by React)", () =
   assert.ok(formatDetail({ log: payload }).includes("<script>"));
 });
 
-test("argument summaries and detail formatting are bounded", () => {
-  assert.equal(summarizeArgs({ path: "inventory.py", lines: 40 }), 'path="inventory.py" lines=40');
-  assert.equal(summarizeArgs({ edits: [{}, {}] }), "edits=[2]");
-  assert.equal(summarizeArgs({ truncated: true, preview: "..." }), "(arguments truncated by server)");
-  assert.ok(summarizeArgs({ content: "x".repeat(500) }).length <= 80);
-  assert.equal(summarizeArgs(undefined), "");
+test("detail formatting is bounded", () => {
   assert.match(formatDetail({ truncated: true, preview: '{"log": "abc' }), /truncated by server/);
   const big = formatDetail("y".repeat(10000));
   assert.ok(big.length < 6100 && big.endsWith("(truncated)"));

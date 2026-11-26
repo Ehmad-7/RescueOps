@@ -1,26 +1,44 @@
 @import "tailwindcss";
 
-/* Operations-console palette: near-black surfaces, hairline borders, one accent. */
+/*
+ * RescueOps design system.
+ * Surfaces: canvas (app) < surface (panels) < raised (hover/selected); sunken for inputs and code.
+ * Text: ink / ink-muted / ink-faint (all >= 5:1 on every surface). One accent; status colours only
+ * for status. Radius: md (6px) controls, lg (8px) panels. Type: 12 / 13 / 14 / 16 / 20.
+ */
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 
-  --color-canvas: #08090b;
-  --color-surface: #0e1013;
-  --color-raised: #14171b;
+  --color-canvas: #0d0f12;
+  --color-surface: #13161a;
+  --color-raised: #191c21;
+  --color-sunken: #0a0c0e;
   --color-line: #22262c;
   --color-line-strong: #2e333a;
-  --color-ink: #e6e8eb;
-  --color-ink-muted: #9aa1ab;
-  --color-ink-faint: #646b75;
 
-  --color-accent: #3dd6b5;
-  --color-accent-ink: #04140f;
+  --color-ink: #e7e9ec;
+  --color-ink-muted: #a0a7b1;
+  --color-ink-faint: #858d98;
 
-  --color-ok: #3fcf8e;
-  --color-warn: #e8b04b;
-  --color-bad: #f06a6a;
-  --color-info: #6fa8ff;
+  --color-accent: #7b93ff;
+  --color-accent-strong: #96a8ff;
+  --color-accent-ink: #0b1030;
+
+  --color-ok: #3fbf7f;
+  --color-warn: #e2a64a;
+  --color-bad: #ef6b6b;
+
+  --animate-enter: enter 180ms ease-out both;
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 :root {
@@ -32,12 +50,8 @@ body {
   color: var(--color-ink);
 }
 
-/* Faint grid backdrop, the only decoration. */
-.console-grid {
-  background-image:
-    linear-gradient(to right, rgb(255 255 255 / 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.025) 1px, transparent 1px);
-  background-size: 32px 32px;
+::selection {
+  background: rgb(123 147 255 / 0.35);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -47,5 +61,6 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

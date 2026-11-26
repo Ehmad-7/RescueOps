@@ -11,6 +11,9 @@ export interface Health {
   model: string;
 }
 
+/** Backend reachability as shown in the UI (from GET /health). */
+export type HealthState = { kind: "loading" } | { kind: "ok"; health: Health } | { kind: "error"; message: string };
+
 export interface Scenario {
   id: string;
   description: string;
@@ -58,6 +61,17 @@ export interface Run {
   event_count: number;
   plan?: PlanStep[];
   events_url?: string;
+}
+
+/**
+ * Merge a GET /runs/{id} response into the current run. Responses can arrive late or out of order:
+ * they never resurrect a run the user already left (prev null / different id), and a run never
+ * goes from terminal back to active. New runs are set directly from POST /runs, not merged.
+ */
+export function mergeRun(prev: Run | null, next: Run): Run | null {
+  if (!prev || prev.id !== next.id) return prev;
+  if (!ACTIVE_STATUSES.includes(prev.status) && ACTIVE_STATUSES.includes(next.status)) return prev;
+  return next;
 }
 
 export const GOAL_MIN = 3;

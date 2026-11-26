@@ -245,30 +245,7 @@ export function reportsFailure(result: unknown): boolean {
 
 const TRUNCATED_FAILURE = /^\{\s*"(?:ok|healthy|passed)"\s*:\s*false\b/;
 
-const MAX_INLINE = 80;
 const MAX_DETAIL = 6000;
-
-/** One-line summary of tool arguments, e.g. `path=inventory.py lines=40`. */
-export function summarizeArgs(args: unknown): string {
-  if (!args || typeof args !== "object") return "";
-  const o = args as Record<string, unknown>;
-  if (o.truncated === true) return "(arguments truncated by server)";
-  const parts = Object.entries(o).map(([k, v]) => {
-    const val =
-      typeof v === "string"
-        ? v.length > 40
-          ? `${JSON.stringify(v.slice(0, 40))}…`
-          : JSON.stringify(v)
-        : Array.isArray(v)
-          ? `[${v.length}]`
-          : v && typeof v === "object"
-            ? "{…}"
-            : String(v);
-    return `${k}=${val}`;
-  });
-  const s = parts.join(" ");
-  return s.length > MAX_INLINE ? `${s.slice(0, MAX_INLINE - 1)}…` : s;
-}
 
 /** Pretty text for an expandable details section. Server-truncated payloads show their preview. */
 export function formatDetail(v: unknown): string {
