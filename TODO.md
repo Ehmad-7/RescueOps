@@ -6,7 +6,7 @@
 - [x] Development environment and secrets setup (`.gitignore`, `.env.example`)
 
 ## Phase 1 — Backend core
-- [ ] Backend scaffold (FastAPI, `/health`, venv, requirements)
+- [x] Backend scaffold (FastAPI, `/health`, `.env` config, venv, pytest)
 - [ ] Demo app + scenarios (`sandbox/`), workspace creation per run
 - [ ] Ops MCP server (health check, tests, logs, restart, status)
 - [ ] Filesystem MCP server integration (rooted at run workspace)
