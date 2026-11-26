@@ -28,6 +28,8 @@ class Settings:
     allowed_origins: tuple[str, ...]
     runs_dir: Path
     max_agent_steps: int
+    max_tool_calls: int
+    run_timeout_s: int
 
     @property
     def gemini_configured(self) -> bool:
@@ -39,8 +41,10 @@ def get_settings() -> Settings:
     origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
         allowed_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         runs_dir=Path(os.getenv("RUNS_DIR", "/tmp/rescueops/runs")),
         max_agent_steps=_int("MAX_AGENT_STEPS", 20),
+        max_tool_calls=_int("MAX_TOOL_CALLS", 40),
+        run_timeout_s=_int("RUN_TIMEOUT_S", 300),
     )

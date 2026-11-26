@@ -11,11 +11,13 @@
 - [x] Ops MCP server (health check, tests, logs, start/stop/restart, status) — `mcp` 2.x `MCPServer`, stdio
 - [x] Filesystem MCP server integration (official server 2.4.0, `--confine-roots` to run workspace)
 - [x] MCP client manager → Gemini function declarations (`app/mcp_bridge.py`: discovery, schema conversion, calls, timeouts, cleanup, path jail)
-- [ ] Gemini integration (google-genai 3.6.1 installed; function-calling loop pending)
-- [ ] Autonomous agent loop (plan tool, bounded steps, finish tool)
-- [ ] Action safety policy in agent loop (approval gate, step/run budgets) — path jail, tool allowlist, timeouts done in bridge
-- [ ] Failure handling and replanning (errors as observations)
-- [ ] Independent verification on finish
+- [x] Gemini integration (google-genai 3.6.1, manual function calling, SDK retries off; default `gemini-3.1-flash-lite`)
+- [x] Autonomous agent loop (`app/agent.py`: `update_plan`/`finish` control tools, step/tool/time budgets)
+- [x] Action safety in loop (step/tool/per-turn/time budgets, bounded observations, malformed calls → errors); path jail + allowlist in bridge
+- [ ] (stretch) Interactive approval gate for destructive actions
+- [x] Failure handling and replanning (tool errors, verification failures and Gemini errors handled; transient retry)
+- [x] Independent verification on finish (restart + health + tests; failure returns control, max 3 attempts)
+- [x] Event interface (`app/events.py` `EventLog` with replay + subscribe)
 - [ ] Run API + SSE event stream
 
 ## Phase 2 — Deploy early
@@ -30,8 +32,9 @@
 - [ ] Vercel deployment
 
 ## Phase 4 — Quality
-- [ ] Agent-loop tests with a scripted model (workspace/ops/bridge tests already exist)
-- [ ] Realistic end-to-end runs per scenario with Gemini
+- [x] Agent-loop tests with a scripted model over real MCP servers (`tests/test_agent.py`)
+- [x] Live Gemini runs: all 3 scenarios verified with `gemini-3.1-flash-lite` (2026-11-26)
+- [ ] Re-check larger models (`gemini-3.8-flash` returned 503/504 on 2026-11-26)
 - [ ] README and setup instructions
 - [ ] Demo scenario and recording checklist
 - [ ] Final GitHub cleanup and verification

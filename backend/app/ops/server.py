@@ -3,6 +3,7 @@
 Usage: python -m app.ops.server <workspace_dir>
 """
 import atexit
+import signal
 import sys
 from pathlib import Path
 
@@ -53,6 +54,9 @@ def main() -> None:
         sys.exit("usage: python -m app.ops.server <workspace_dir>")
     mcp, ops = build_server(Path(sys.argv[1]))
     atexit.register(ops.close)
+    # The MCP client terminates this process with SIGTERM; exit normally so atexit
+    # stops the app process group instead of orphaning it.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     mcp.run("stdio")
 
 
