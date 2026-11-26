@@ -6,6 +6,8 @@ import StatusBadge from "./StatusBadge";
 
 interface Props {
   run: Run | null;
+  livePlan: PlanStep[] | null; // latest plan from the SSE timeline (fresher than polling)
+  liveEventCount: number;
   lost: boolean; // run vanished from the backend; final state unknown
   pollError: string | null;
   cancelling: boolean;
@@ -72,7 +74,7 @@ function CopyId({ id }: { id: string }) {
   );
 }
 
-export default function RunSummary({ run, lost, pollError, cancelling, cancelError, onCancel }: Props) {
+export default function RunSummary({ run, livePlan, liveEventCount, lost, pollError, cancelling, cancelError, onCancel }: Props) {
   if (!run) {
     return (
       <section aria-labelledby="summary-title" className="flex min-h-[320px] flex-col rounded-xl border border-dashed border-line bg-surface/50">
@@ -94,7 +96,7 @@ export default function RunSummary({ run, lost, pollError, cancelling, cancelErr
 
   const active = !lost && ACTIVE_STATUSES.includes(run.status);
   const r = run.result;
-  const plan = run.plan?.length ? run.plan : (r?.plan ?? []);
+  const plan = livePlan?.length ? livePlan : run.plan?.length ? run.plan : (r?.plan ?? []);
 
   return (
     <section aria-labelledby="summary-title" className="rounded-xl border border-line bg-surface">
@@ -116,7 +118,7 @@ export default function RunSummary({ run, lost, pollError, cancelling, cancelErr
           <Field label="Scenario" mono>{run.scenario}</Field>
           <Field label="Started" mono>{fmtTime(run.started_at ?? run.created_at)}</Field>
           <Field label="Duration" mono>{fmtDuration(run)}</Field>
-          <Field label="Events" mono>{run.event_count}</Field>
+          <Field label="Events" mono>{Math.max(run.event_count, liveEventCount)}</Field>
         </dl>
 
         <div>

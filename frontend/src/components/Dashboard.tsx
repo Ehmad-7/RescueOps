@@ -1,12 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ACTIVE_STATUSES, ApiError, api, errorMessage, type Health, type Run, type Scenario } from "@/lib/api";
+import { useRunEvents } from "@/lib/useRunEvents";
 import LaunchPanel from "./LaunchPanel";
 import RunSummary from "./RunSummary";
+import Timeline from "./Timeline";
 
-const POLL_MS = 1500;
+const POLL_MS = 1500; // authoritative status refresh while the live stream is not open
+const POLL_LIVE_MS = 4000; // slower fallback refresh while SSE is delivering events
 const POLL_MAX_MS = 8000;
+
+/** Polling responses can arrive out of order: a run never goes from terminal back to active. */
+function mergeRun(prev: Run | null, next: Run): Run | null {
+  if (prev && prev.id !== next.id) return prev; // response for a previous run
+  if (prev && !ACTIVE_STATUSES.includes(prev.status) && ACTIVE_STATUSES.includes(next.status)) return prev;
+  return next;
+}
 
 type HealthState = { kind: "loading" } | { kind: "ok"; health: Health } | { kind: "error"; message: string };
 
@@ -74,21 +84,37 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Poll the run summary while it is active (live event streaming comes in a later milestone).
-  const runId = run?.id;
+  const runId = run?.id ?? null;
   const runActive = run && !runLost ? ACTIVE_STATUSES.includes(run.status) : false;
+
+  // Terminal SSE event: fetch the authoritative final summary now instead of at the next poll.
+  const refreshNow = useCallback(() => {
+    if (!runId) return;
+    api.getRun(runId).then((next) => setRun((prev) => mergeRun(prev, next)), () => undefined);
+  }, [runId]);
+
+  // Live timeline (SSE). It never changes run status; GET /runs/{id} stays authoritative.
+  const { timeline, connection, retry } = useRunEvents(runId, !!runId && !runLost, refreshNow);
+  // Read through a ref: restarting the poll loop on every connection change would reset its
+  // timer, and a flapping stream could postpone the authoritative status refresh indefinitely.
+  const pollMsRef = useRef(POLL_MS);
+  useEffect(() => {
+    pollMsRef.current = connection === "open" ? POLL_LIVE_MS : POLL_MS;
+  }, [connection]);
+
+  // Poll the run summary while it is active.
   useEffect(() => {
     if (!runId || !runActive) return;
     let alive = true;
-    let delay = POLL_MS;
+    let delay = pollMsRef.current;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       try {
         const next = await api.getRun(runId);
         if (!alive) return;
-        setRun(next);
+        setRun((prev) => mergeRun(prev, next));
         setPollError(null);
-        delay = POLL_MS;
+        delay = pollMsRef.current;
         if (ACTIVE_STATUSES.includes(next.status)) timer = setTimeout(tick, delay);
       } catch (err) {
         if (!alive) return;
@@ -134,11 +160,12 @@ export default function Dashboard() {
     setCancelError(null);
     try {
       await api.cancelRun(run.id);
-      setRun(await api.getRun(run.id));
+      const next = await api.getRun(run.id);
+      setRun((prev) => mergeRun(prev, next));
     } catch (err) {
       // 409: it finished first; refresh to show the final state.
       if (err instanceof ApiError && err.status === 409) {
-        api.getRun(run.id).then(setRun, () => undefined);
+        api.getRun(run.id).then((next) => setRun((prev) => mergeRun(prev, next)), () => undefined);
       } else {
         setCancelError(`Cancel failed: ${errorMessage(err)}`);
       }
@@ -179,8 +206,9 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* DOM order (mobile): launch, summary, timeline. Desktop: summary spans both rows on the right. */}
         <div className="grid gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-7">
+          <div className="min-w-0 lg:col-span-7">
             <LaunchPanel
               scenarios={scenarios}
               scenariosError={scenariosError}
@@ -192,9 +220,11 @@ export default function Dashboard() {
               onLaunch={launch}
             />
           </div>
-          <div className="lg:col-span-5">
+          <div className="min-w-0 lg:col-span-5 lg:col-start-8 lg:row-span-2 lg:row-start-1">
             <RunSummary
               run={run}
+              livePlan={timeline.plan}
+              liveEventCount={timeline.eventCount}
               lost={runLost}
               pollError={pollError}
               cancelling={cancelling}
@@ -202,6 +232,11 @@ export default function Dashboard() {
               onCancel={cancel}
             />
           </div>
+          {run && (
+            <div className="min-w-0 lg:col-span-7">
+              <Timeline key={run.id} timeline={timeline} connection={connection} lost={runLost} onRetry={retry} />
+            </div>
+          )}
         </div>
       </main>
     </div>

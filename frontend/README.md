@@ -1,10 +1,14 @@
 # RescueOps — Frontend
 
-Dashboard for the RescueOps recovery agent: launch a recovery run, then follow its status,
-plan, diagnosis and independent verification result. Built with Next.js (App Router),
-TypeScript and Tailwind CSS.
+Dashboard for the RescueOps recovery agent: launch a recovery run, follow the agent's live
+activity (plan, tool calls, verification), and see the authoritative run summary. Built with
+Next.js (App Router), TypeScript and Tailwind CSS.
 
-The run summary refreshes by polling `GET /runs/{id}` while a run is active.
+- **Live timeline:** native `EventSource` on `GET /runs/{id}/events`. Reconnects resume from the
+  last event (`Last-Event-ID`, or `?after=` after a hard failure), events are deduplicated by
+  `seq`, and the stream is closed after the terminal event.
+- **Run summary:** `GET /runs/{id}` stays the source of truth for status and result. It is polled
+  while the run is active (slower while the live stream is open) and refreshed on the terminal event.
 
 ## Requirements
 
@@ -46,6 +50,7 @@ API key stays on the backend.
 | --------------- | -------------------------------------------- |
 | `npm run dev`   | Development server                           |
 | `npm run lint`  | ESLint                                       |
+| `npm test`      | Unit tests (event parsing, dedup, reconnect) via `node --test` |
 | `npm run build` | Production build, including type checking    |
 | `npm start`     | Serve the production build                   |
 
@@ -57,4 +62,5 @@ API key stays on the backend.
 | GET    | `/scenarios`        | Failure scenario options             |
 | POST   | `/runs`             | Start a run (`{ goal, scenario }`)   |
 | GET    | `/runs/{id}`        | Run summary (polled while active)    |
+| GET    | `/runs/{id}/events` | Live event stream (SSE)              |
 | POST   | `/runs/{id}/cancel` | Cancel an active run                 |
