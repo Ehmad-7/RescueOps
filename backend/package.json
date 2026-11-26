@@ -1,0 +1,8 @@
+{
+  "name": "rescueops-backend-mcp",
+  "private": true,
+  "description": "Node MCP servers used by the RescueOps backend",
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "2.4.0"
+  }
+}

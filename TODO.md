@@ -9,18 +9,18 @@
 - [x] Backend scaffold (FastAPI, `/health`, `.env` config, venv, pytest)
 - [x] Demo app + scenarios (`sandbox/`), workspace creation per run
 - [x] Ops MCP server (health check, tests, logs, start/stop/restart, status) — `mcp` 2.x `MCPServer`, stdio
-- [ ] Filesystem MCP server integration (rooted at run workspace)
-- [ ] MCP client manager → Gemini function declarations
-- [ ] Gemini integration (google-genai, function calling)
+- [x] Filesystem MCP server integration (official server 2.4.0, `--confine-roots` to run workspace)
+- [x] MCP client manager → Gemini function declarations (`app/mcp_bridge.py`: discovery, schema conversion, calls, timeouts, cleanup, path jail)
+- [ ] Gemini integration (google-genai 3.6.1 installed; function-calling loop pending)
 - [ ] Autonomous agent loop (plan tool, bounded steps, finish tool)
-- [ ] Controlled workspace and action safety (policy, path jail, timeouts)
+- [ ] Action safety policy in agent loop (approval gate, step/run budgets) — path jail, tool allowlist, timeouts done in bridge
 - [ ] Failure handling and replanning (errors as observations)
 - [ ] Independent verification on finish
 - [ ] Run API + SSE event stream
 
 ## Phase 2 — Deploy early
-- [ ] Dockerfile (Python + Node, MCP servers preinstalled)
-- [ ] Cloud Run deployment (needs gcloud CLI + project) 
+- [ ] Dockerfile (Python + Node ≥24, `npm ci` in backend/, MCP servers preinstalled)
+- [ ] Cloud Run deployment (needs gcloud CLI + project)
 - [ ] Smoke test live backend
 
 ## Phase 3 — Frontend
@@ -30,7 +30,7 @@
 - [ ] Vercel deployment
 
 ## Phase 4 — Quality
-- [ ] Automated tests (policy, workspace, ops tools, scenarios break/fix, loop with fake model)
+- [ ] Agent-loop tests with a scripted model (workspace/ops/bridge tests already exist)
 - [ ] Realistic end-to-end runs per scenario with Gemini
 - [ ] README and setup instructions
 - [ ] Demo scenario and recording checklist
@@ -39,4 +39,4 @@
 ## Blockers / notes
 - gcloud CLI not installed; GCP project + billing needed for Cloud Run.
 - Vercel CLI not installed (use `npx vercel` or GitHub integration).
-- `GEMINI_API_KEY` needed in `.env`.
+- Filesystem MCP server requires Node ≥24 (works on local Node 22 with an engine warning; use Node 24 in Docker).

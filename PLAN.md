@@ -12,7 +12,7 @@ FastAPI backend (Cloud Run)
    ├─ Agent loop (Gemini function calling, google-genai SDK)
    ├─ MCP client (python `mcp` SDK, stdio)
    │    ├─ filesystem MCP  (@modelcontextprotocol/server-filesystem, rooted at run workspace)
-   │    └─ ops MCP         (own FastMCP server: health check, tests, logs, restart)
+   │    └─ ops MCP         (own `MCPServer`: status, start/stop/restart, logs, health, tests)
    ├─ Safety policy (allowlist, path jail, approval gate, timeouts)
    └─ Run workspaces  /tmp/rescueops/runs/<run_id>/app   (copied from a broken-app scenario)
 ```
@@ -47,21 +47,22 @@ finish is accepted as "verified" only if the backend's own health check + tests 
 - Final verification is independent of the model's claim (prevents faked success).
 
 ## MCP integration
-- **filesystem** (official): `list_directory`, `read_text_file`, `search_files`, `edit_file`, `write_file`, … rooted only at the run's workspace.
+- **filesystem** (official `@modelcontextprotocol/server-filesystem` 2.4.0, installed via `backend/package.json`, started with `--confine-roots <workspace>`). Exposed subset: `read_text_file`, `read_multiple_files`, `list_directory`, `directory_tree`, `search_files`, `get_file_info`, `write_file`, `edit_file`, `create_directory`, `copy_file`. Not exposed: `move_file` (destructive), `read_media_file`, `read_file`, `append_file`, `list_directory_with_sizes`, `list_allowed_directories`.
 - **ops** (custom, `mcp` 2.x `MCPServer`, stdio, one process per run bound to one workspace): `get_app_status`, `start_app`, `stop_app`, `restart_app`, `read_logs`, `run_health_check`, `run_tests`. No tool takes a path or command; each runs a fixed argv in the workspace with timeout and output cap.
-- Tool schemas are fetched dynamically via `list_tools` and converted to Gemini function declarations; the agent decides when to call them.
+- `app/mcp_bridge.py` `MCPManager`: starts both servers per run, discovers tools via `list_tools`, converts JSON Schemas to Gemini `types.Schema` function declarations, routes calls, enforces timeouts, and returns real results/errors as JSON observations. Agent uses workspace-relative paths; absolute paths in results are mapped back.
 
 ## Safety model
-- No shell tool. Only allowlisted operations with fixed argv (no string interpolation into a shell).
-- Path jail: filesystem MCP root = run workspace; backend re-validates paths.
-- Exposed write ops limited to edit/write within workspace; filesystem `move_file`/destructive ops require approval (MVP: denied → agent must replan).
-- Subprocess limits: fixed argv, cwd=workspace, own process group, rlimits (512MB memory, 10MB file size), timeouts, output truncation, env scrubbed of secrets, app binds 127.0.0.1 only.
+- No shell tool; only allowlisted MCP tools. Ops tools take no paths/commands and run fixed argv.
+- Path jail (two layers): filesystem server allowed dir = workspace, and the bridge re-validates every path arg (rejects `..`, outside absolute paths, symlink escapes, NUL bytes).
+- Integrity: writes to `tests/` and `logs/` are blocked, so the agent cannot "fix" a failure by editing the checks. Destructive tools (`move_file`) are not exposed.
+- MCP server processes get a minimal env (no `GEMINI_API_KEY`).
+- App/test subprocess limits: fixed argv, cwd=workspace, own process group, rlimits (512MB memory, 10MB file size), timeouts, output truncation, env scrubbed of secrets, app binds 127.0.0.1 only.
 - Residual risk: the agent can edit app code that the app/tests then execute. Contained by the above limits and the ephemeral Cloud Run container; no secrets reachable from the child env.
 - Bounded iterations, per-tool timeouts, total run timeout, rate limiting of runs.
 - Secrets only via env (`GEMINI_API_KEY`); `.env` git-ignored.
 
 ## Deployment
-- Backend: Dockerfile → Cloud Run (`gcloud run deploy --source`), `GEMINI_API_KEY` via Secret Manager/env, CORS restricted to the Vercel origin.
+- Backend: Dockerfile (Python 3.12 + Node 24, `pip install`, `npm ci`) → Cloud Run (`gcloud run deploy --source`), `GEMINI_API_KEY` via Secret Manager/env, CORS restricted to the Vercel origin.
 - Frontend: Vercel, `NEXT_PUBLIC_API_URL` → Cloud Run URL.
 - Deploy a skeleton early (by mid-build) and redeploy per milestone.
 
