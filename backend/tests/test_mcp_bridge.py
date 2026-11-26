@@ -173,3 +173,28 @@ def test_secrets_not_passed_to_servers(ws, monkeypatch):
     from app.mcp_bridge import default_servers
     for p in default_servers(ws).values():
         assert "GEMINI_API_KEY" not in (p.env or {})
+
+
+def test_kill_workspace_processes_is_scoped(ws, tmp_path):
+    import subprocess
+    import time
+
+    from app.mcp_bridge import kill_workspace_processes
+    outside_dir = tmp_path / "elsewhere"
+    outside_dir.mkdir()
+    sibling = tmp_path / "runs" / "bridge-other"   # prefix-similar path must not match
+    sibling.mkdir(parents=True)
+    inside = subprocess.Popen(["sleep", "30"], cwd=ws / "data")
+    outside = subprocess.Popen(["sleep", "30"], cwd=outside_dir)
+    near = subprocess.Popen(["sleep", "30"], cwd=sibling)
+    try:
+        time.sleep(0.2)
+        killed = kill_workspace_processes(ws)
+        assert inside.pid in killed and outside.pid not in killed and near.pid not in killed
+        assert inside.wait(timeout=5) == -9
+        assert outside.poll() is None and near.poll() is None
+        assert os.getpid() not in killed
+    finally:
+        for p in (inside, outside, near):
+            p.kill()
+            p.wait()

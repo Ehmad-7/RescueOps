@@ -6,7 +6,6 @@ environment, resource limits and timeouts. No caller-supplied paths or argv.
 import json
 import os
 import resource
-import signal
 import socket
 import subprocess
 import sys
@@ -27,7 +26,8 @@ def _truncate(text: str, limit: int = MAX_OUTPUT) -> str:
 def _limits() -> None:  # runs in child before exec
     resource.setrlimit(resource.RLIMIT_AS, (512 * 2**20, 512 * 2**20))
     resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 2**20, 10 * 2**20))
-    os.setsid()
+    # No setsid(): children stay in the ops server's process group, so the MCP client's
+    # group kill on shutdown also reaches the app/tests even if this server is SIGKILLed.
 
 
 def _free_port() -> int:
@@ -99,11 +99,11 @@ class OpsController:
     def stop_app(self) -> dict:
         if not self._running():
             return {"ok": True, "message": "not running", **self.get_app_status()}
-        os.killpg(self.proc.pid, signal.SIGTERM)
+        self.proc.terminate()
         try:
             self.proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            os.killpg(self.proc.pid, signal.SIGKILL)
+            self.proc.kill()
             self.proc.wait(timeout=3)
         return {"ok": True, "message": "stopped", **self.get_app_status()}
 

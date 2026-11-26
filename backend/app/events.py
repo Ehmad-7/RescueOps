@@ -17,7 +17,8 @@ VERIFICATION_STARTED = "verification_started"
 VERIFICATION_COMPLETED = "verification_completed"
 RUN_COMPLETED = "run_completed"
 RUN_FAILED = "run_failed"
-TERMINAL = {RUN_COMPLETED, RUN_FAILED}
+RUN_CANCELLED = "run_cancelled"
+TERMINAL = {RUN_COMPLETED, RUN_FAILED, RUN_CANCELLED}
 
 
 @dataclass(frozen=True)
@@ -32,12 +33,12 @@ class Event:
 
 
 class EventLog:
-    """Keeps every event (for replay) and fans out new ones to live subscribers."""
+    """Append-only event log per run; readers replay from any seq and wait for new events."""
 
     def __init__(self, run_id: str):
         self.run_id = run_id
         self.events: list[Event] = []
-        self._subscribers: list[asyncio.Queue[Event]] = []
+        self._changed = asyncio.Event()
 
     @property
     def closed(self) -> bool:
@@ -46,27 +47,38 @@ class EventLog:
     def emit(self, type_: str, **data: Any) -> Event:
         ev = Event(seq=len(self.events), type=type_, ts=round(time.time(), 3), data=data)
         self.events.append(ev)
-        for q in self._subscribers:
-            q.put_nowait(ev)
+        self._changed.set()
+        self._changed = asyncio.Event()
         return ev
 
-    async def subscribe(self, after: int = -1) -> AsyncIterator[Event]:
-        """Yield past events with seq > after, then live ones until a terminal event."""
-        q: asyncio.Queue[Event] = asyncio.Queue()
-        self._subscribers.append(q)
-        try:
-            backlog = [e for e in self.events if e.seq > after]
-            for ev in backlog:
+    def since(self, after: int) -> list[Event]:
+        return self.events[max(after + 1, 0):]
+
+    async def wait(self, after: int, timeout: float) -> list[Event]:
+        """Events with seq > after; waits up to `timeout` for new ones (empty list on timeout)."""
+        if not self.since(after) and not self.closed:
+            changed = self._changed
+            try:
+                await asyncio.wait_for(changed.wait(), timeout)
+            except TimeoutError:
+                pass
+        return self.since(after)
+
+    async def subscribe(self, after: int = -1, heartbeat: float | None = None) -> AsyncIterator[Event | None]:
+        """Yield events with seq > after (replay, then live) until a terminal event.
+
+        With `heartbeat`, yields None after that many idle seconds (for SSE keep-alives).
+        """
+        while True:
+            batch = await self.wait(after, heartbeat if heartbeat else 3600)
+            if not batch:
+                if self.closed:  # caller is already past the terminal event
+                    return
+                if heartbeat:
+                    yield None
+                continue
+            for ev in batch:
+                after = ev.seq
                 yield ev
                 if ev.type in TERMINAL:
                     return
-            last = backlog[-1].seq if backlog else after
-            while True:
-                ev = await q.get()
-                if ev.seq <= last:
-                    continue
-                yield ev
-                if ev.type in TERMINAL:
-                    return
-        finally:
-            self._subscribers.remove(q)

@@ -6,7 +6,7 @@ Autonomous Gemini DevOps agent: given a goal like *"Investigate why my applicati
 
 ```
 Next.js dashboard (Vercel)
-   │  POST /api/runs {goal, scenario}      GET /api/runs/{id}/events (SSE)
+   │  POST /runs {goal, scenario}   GET /runs/{id}   GET /runs/{id}/events (SSE)   POST /runs/{id}/cancel
    ▼
 FastAPI backend (Cloud Run)
    ├─ Agent loop (Gemini function calling, google-genai SDK)
@@ -18,7 +18,11 @@ FastAPI backend (Cloud Run)
 ```
 
 - One backend container (Python + Node for the filesystem MCP server, pre-installed — no runtime `npx` download).
-- In-memory run store; runs are ephemeral. No database.
+- In-memory run store (`app/runs.py` `RunManager`); runs are ephemeral, no database. Each run is an asyncio task:
+  workspace → MCP servers → agent → cleanup (workspace deleted, servers and app stopped).
+  Status: `queued → running → verified | unverified | failed | cancelled`. Max `MAX_CONCURRENT_RUNS` active (429 beyond), 100 stored.
+- SSE: `id: <seq>`, `event: <type>`, `data: <json>`; replay from `Last-Event-ID` header or `?after=`; `: keep-alive` every 15s; stream closes after the terminal event.
+- Cloud Run note: in-memory state requires a single instance (`--max-instances 1`) and request-based CPU kept alive by the open SSE stream; acceptable for the demo.
 
 ## Target app & scenarios
 `sandbox/demo_app/` — tiny stdlib Python HTTP service (`/health`, `/api/items`) with `config.json` and unittest tests. Each scenario is a patch that breaks it differently:
@@ -58,7 +62,7 @@ finally: stop_app; emit run_completed | run_failed
 - Path jail (two layers): filesystem server allowed dir = workspace, and the bridge re-validates every path arg (rejects `..`, outside absolute paths, symlink escapes, NUL bytes).
 - Integrity: writes to `tests/` and `logs/` are blocked, so the agent cannot "fix" a failure by editing the checks. Destructive tools (`move_file`) are not exposed.
 - MCP server processes get a minimal env (no `GEMINI_API_KEY`).
-- App/test subprocess limits: fixed argv, cwd=workspace, own process group, rlimits (512MB memory, 10MB file size), timeouts, output truncation, env scrubbed of secrets, app binds 127.0.0.1 only.
+- App/test subprocess limits: fixed argv, cwd=workspace, same process group as the ops server (SDK group-kills it on shutdown; `stop_app` signals only the app PID), plus a post-teardown sweep of any process whose cwd is inside the workspace (covers a crashed/SIGKILLed ops server), rlimits (512MB memory, 10MB file size), timeouts, output truncation, env scrubbed of secrets, app binds 127.0.0.1 only.
 - Residual risk: the agent can edit app code that the app/tests then execute. Contained by the above limits and the ephemeral Cloud Run container; no secrets reachable from the child env.
 - Bounded iterations, tool-call budget, per-turn call cap, per-tool and per-model-call timeouts, total run timeout, bounded observation sizes; rate limiting of runs (API milestone).
 - Secrets only via env (`GEMINI_API_KEY`); `.env` git-ignored.

@@ -18,10 +18,10 @@
 - [x] Failure handling and replanning (tool errors, verification failures and Gemini errors handled; transient retry)
 - [x] Independent verification on finish (restart + health + tests; failure returns control, max 3 attempts)
 - [x] Event interface (`app/events.py` `EventLog` with replay + subscribe)
-- [ ] Run API + SSE event stream
+- [x] Run API + SSE (`POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/events`, `POST /runs/{id}/cancel`, `GET /scenarios`; replay, Last-Event-ID, heartbeats, concurrency limit)
 
 ## Phase 2 — Deploy early
-- [ ] Dockerfile (Python + Node ≥24, `npm ci` in backend/, MCP servers preinstalled)
+- [ ] Dockerfile (Python + Node ≥24, `npm ci` in backend/, MCP servers preinstalled, init process for zombie reaping e.g. `tini`)
 - [ ] Cloud Run deployment (needs gcloud CLI + project)
 - [ ] Smoke test live backend
 

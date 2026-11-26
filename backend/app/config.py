@@ -30,6 +30,7 @@ class Settings:
     max_agent_steps: int
     max_tool_calls: int
     run_timeout_s: int
+    max_concurrent_runs: int
 
     @property
     def gemini_configured(self) -> bool:
@@ -47,4 +48,5 @@ def get_settings() -> Settings:
         max_agent_steps=_int("MAX_AGENT_STEPS", 20),
         max_tool_calls=_int("MAX_TOOL_CALLS", 40),
         run_timeout_s=_int("RUN_TIMEOUT_S", 300),
+        max_concurrent_runs=_int("MAX_CONCURRENT_RUNS", 2),
     )

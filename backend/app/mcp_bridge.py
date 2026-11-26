@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -226,9 +227,14 @@ class MCPManager:
         stack, self._stack = self._stack, None
         self.sessions.clear()
         if stack is not None:
-            # Not wrapped in a shield scope: the stdio task groups must exit in the
-            # cancel-scope context they were entered in.
-            await stack.aclose()  # terminates server subprocesses
+            try:
+                # Not wrapped in a shield scope: the stdio task groups must exit in the
+                # cancel-scope context they were entered in.
+                await stack.aclose()  # terminates server subprocesses
+            finally:
+                # The SDK only kills the server's process group when the server is still alive;
+                # if it crashed or was SIGKILLed, its app/test children survive. Sweep them.
+                kill_workspace_processes(self.workspace)
 
     def function_declarations(self) -> list[types.FunctionDeclaration]:
         return [to_function_declaration(s) for s in self.tools.values()]
@@ -283,6 +289,32 @@ class MCPManager:
                 text = text[:MAX_RESULT_CHARS] + "\n...[truncated]"
             out["result" if not is_error else "error"] = text
         return out
+
+
+def kill_workspace_processes(root: Path) -> list[int]:
+    """SIGKILL every process (ours) whose cwd is inside `root`. Linux /proc; no-op elsewhere.
+
+    Run-scoped and group-independent: catches app/test processes orphaned by a crashed ops
+    server. Never matches the backend or the ops server (their cwd is BACKEND_DIR).
+    """
+    proc, me, killed = Path("/proc"), os.getpid(), []
+    if not proc.is_dir():
+        return killed
+    root = Path(root).resolve()
+    for entry in proc.iterdir():
+        if not entry.name.isdigit() or int(entry.name) == me:
+            continue
+        try:
+            cwd = Path(os.readlink(entry / "cwd"))
+        except OSError:  # exited, zombie, or not ours
+            continue
+        if cwd == root or cwd.is_relative_to(root):
+            try:
+                os.kill(int(entry.name), signal.SIGKILL)
+                killed.append(int(entry.name))
+            except (ProcessLookupError, PermissionError):
+                pass
+    return killed
 
 
 def default_servers(workspace: Path) -> dict[str, StdioServerParameters]:
