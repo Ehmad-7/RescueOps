@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/* Operations-console palette: near-black surfaces, hairline borders, one accent. */
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --color-canvas: #08090b;
+  --color-surface: #0e1013;
+  --color-raised: #14171b;
+  --color-line: #22262c;
+  --color-line-strong: #2e333a;
+  --color-ink: #e6e8eb;
+  --color-ink-muted: #9aa1ab;
+  --color-ink-faint: #646b75;
+
+  --color-accent: #3dd6b5;
+  --color-accent-ink: #04140f;
+
+  --color-ok: #3fcf8e;
+  --color-warn: #e8b04b;
+  --color-bad: #f06a6a;
+  --color-info: #6fa8ff;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+/* Faint grid backdrop, the only decoration. */
+.console-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
