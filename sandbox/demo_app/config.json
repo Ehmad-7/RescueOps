@@ -1,0 +1,6 @@
+{
+  "service_name": "inventory-api",
+  "port": 8080,
+  "data_file": "data/items.json",
+  "max_items": 50
+}

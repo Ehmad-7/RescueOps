@@ -7,8 +7,8 @@
 
 ## Phase 1 — Backend core
 - [x] Backend scaffold (FastAPI, `/health`, `.env` config, venv, pytest)
-- [ ] Demo app + scenarios (`sandbox/`), workspace creation per run
-- [ ] Ops MCP server (health check, tests, logs, restart, status)
+- [x] Demo app + scenarios (`sandbox/`), workspace creation per run
+- [x] Ops MCP server (health check, tests, logs, start/stop/restart, status) — `mcp` 2.x `MCPServer`, stdio
 - [ ] Filesystem MCP server integration (rooted at run workspace)
 - [ ] MCP client manager → Gemini function declarations
 - [ ] Gemini integration (google-genai, function calling)

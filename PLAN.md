@@ -22,10 +22,10 @@ FastAPI backend (Cloud Run)
 
 ## Target app & scenarios
 `sandbox/demo_app/` — tiny stdlib Python HTTP service (`/health`, `/api/items`) with `config.json` and unittest tests. Each scenario is a patch that breaks it differently:
-1. **bad-config** — wrong/missing key in `config.json` → app crashes on start.
-2. **code-bug** — logic/syntax error in a module → health check or tests fail.
-3. **missing-file** — referenced data file renamed/missing.
-4. **multi-fault** — two faults; first fix doesn't fully recover → forces replanning.
+1. **bad-config** — `max_items` has wrong type in `config.json` → app refuses to start.
+2. **code-bug** — `inventory.total_value` uses a wrong key → KeyError on start, tests fail.
+3. **missing-file** — `data/items.json` left as `items.json.bak` → FileNotFoundError on start.
+4. *(stretch)* **multi-fault** — two faults; first fix doesn't fully recover → forces replanning.
 
 Each run copies the healthy app, applies the scenario, and gives the agent only the goal (never the scenario name).
 
@@ -48,14 +48,15 @@ finish is accepted as "verified" only if the backend's own health check + tests 
 
 ## MCP integration
 - **filesystem** (official): `list_directory`, `read_text_file`, `search_files`, `edit_file`, `write_file`, … rooted only at the run's workspace.
-- **ops** (custom FastMCP, stdio): `run_health_check`, `run_tests`, `read_logs`, `restart_app`, `get_app_status`. Each runs a fixed, allowlisted command in the workspace with timeout and output cap.
+- **ops** (custom, `mcp` 2.x `MCPServer`, stdio, one process per run bound to one workspace): `get_app_status`, `start_app`, `stop_app`, `restart_app`, `read_logs`, `run_health_check`, `run_tests`. No tool takes a path or command; each runs a fixed argv in the workspace with timeout and output cap.
 - Tool schemas are fetched dynamically via `list_tools` and converted to Gemini function declarations; the agent decides when to call them.
 
 ## Safety model
 - No shell tool. Only allowlisted operations with fixed argv (no string interpolation into a shell).
 - Path jail: filesystem MCP root = run workspace; backend re-validates paths.
 - Exposed write ops limited to edit/write within workspace; filesystem `move_file`/destructive ops require approval (MVP: denied → agent must replan).
-- Subprocess limits: timeout, output truncation, no network for the app process where possible, env scrubbed of secrets.
+- Subprocess limits: fixed argv, cwd=workspace, own process group, rlimits (512MB memory, 10MB file size), timeouts, output truncation, env scrubbed of secrets, app binds 127.0.0.1 only.
+- Residual risk: the agent can edit app code that the app/tests then execute. Contained by the above limits and the ephemeral Cloud Run container; no secrets reachable from the child env.
 - Bounded iterations, per-tool timeouts, total run timeout, rate limiting of runs.
 - Secrets only via env (`GEMINI_API_KEY`); `.env` git-ignored.
 
