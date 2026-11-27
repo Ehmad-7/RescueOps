@@ -256,3 +256,30 @@ def test_event_log_subscription_replays_and_streams():
 
     assert anyio.run(main) == [ev.RUN_STARTED, ev.TOOL_STARTED, ev.RUN_COMPLETED]
     assert log.closed
+
+
+def test_agent_context_does_not_reveal_blind_fault(tmp_path):
+    """The model only gets the system prompt, the goal and tool schemas: no scenario metadata."""
+    from app.agent import SYSTEM_PROMPT
+    from app.workspace import SCENARIOS
+
+    ws = create_workspace("blind-incident", "blind", runs_dir=tmp_path / "runs")
+    configs = []
+
+    class Capturing(ScriptedModel):
+        async def generate(self, contents, config):
+            configs.append(config)
+            return await super().generate(contents, config)
+
+    model = Capturing([resp(call("finish", status="failed", root_cause="n/a", summary="n/a"))])
+    result, log = run_agent(ws, model)
+    assert result.status == "failed"
+    first = json.dumps([c.model_dump() for c in model.seen[0]], default=str)
+    cfg = json.dumps(configs[0].model_dump(), default=str)
+    started = json.dumps(log.events[0].data)
+    assert f"Goal: {GOAL}" in first and configs[0].system_instruction == SYSTEM_PROMPT
+    desc = SCENARIOS["blind-incident"][0]
+    for blob in (first, cfg, started):
+        low = blob.lower()
+        for leak in ("blind", "scenario", desc.lower(), "b-200", "gadget", "items.json", "corrupt"):
+            assert leak not in low, (leak, blob[:200])

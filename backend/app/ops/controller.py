@@ -1,14 +1,16 @@
 """Controlled operations on a single demo-app workspace.
 
-Only fixed, allowlisted commands run, always with cwd=workspace, a scrubbed
-environment, resource limits and timeouts. No caller-supplied paths or argv.
+Only fixed, allowlisted commands run, with a scrubbed environment, resource limits
+and timeouts (cwd=workspace; tests come from a trusted backend-owned copy). No caller-supplied paths or argv.
 """
 import json
 import os
 import resource
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -17,6 +19,21 @@ from pathlib import Path
 MAX_OUTPUT = 4000
 TEST_TIMEOUT = 30
 START_WAIT = 5.0
+# Trusted test suite: the pristine template's tests, outside every agent-writable workspace.
+# Verification never runs the workspace's own tests/ (the running app could rewrite them).
+TRUSTED_TESTS = Path(__file__).resolve().parents[3] / "sandbox" / "demo_app" / "tests"
+# Runs under `python -I -S`: no cwd/script dir/site-packages on sys.path, no PYTHON* env vars.
+# unittest is imported before the workspace is reachable, and the workspace is appended LAST,
+# so workspace files cannot shadow the runner or stdlib modules; they can only provide the
+# app modules under test (app, inventory).
+TEST_RUNNER = """# rescueops-test-runner
+import sys, unittest
+workspace, tests = sys.argv[1], sys.argv[2]
+sys.path.append(workspace)
+suite = unittest.defaultTestLoader.discover(tests, top_level_dir=tests)
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+sys.exit(0 if result.wasSuccessful() and result.testsRun else 1 if result.testsRun else 5)
+"""
 
 
 def _truncate(text: str, limit: int = MAX_OUTPUT) -> str:
@@ -37,8 +54,11 @@ def _free_port() -> int:
 
 
 class OpsController:
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, tests_dir: Path = TRUSTED_TESTS):
         self.root = Path(workspace).resolve(strict=True)
+        self.tests_dir = Path(tests_dir).resolve(strict=True)
+        if self.tests_dir.is_relative_to(self.root):
+            raise ValueError("trusted tests must live outside the workspace")
         if not (self.root / "app.py").is_file():
             raise ValueError("workspace has no app.py")
         self.log_path = self.root / "logs" / "app.log"
@@ -135,13 +155,20 @@ class OpsController:
         return {"healthy": healthy, "checks": results}
 
     def run_tests(self) -> dict:
-        try:
-            r = subprocess.run(
-                [sys.executable, "-E", "-s", "-m", "unittest", "discover", "-s", "tests", "-v"],
-                cwd=self.root, env=self._env(), stdin=subprocess.DEVNULL, capture_output=True,
-                text=True, timeout=TEST_TIMEOUT, preexec_fn=_limits)
-        except subprocess.TimeoutExpired:
-            return {"passed": False, "exit_code": None, "output": f"tests timed out after {TEST_TIMEOUT}s"}
+        # Fresh backend-owned copy of the trusted tests per run: the tests resolve their imports
+        # relative to their own location, so this dir holds nothing but tests/.
+        with tempfile.TemporaryDirectory(prefix="rescueops-tests-") as tmp:
+            tests = Path(tmp) / "tests"
+            shutil.copytree(self.tests_dir, tests, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-I", "-S", "-c", TEST_RUNNER, str(self.root), str(tests)],
+                    # cwd=workspace is not importable under -I; it keeps the runner findable by
+                    # mcp_bridge.kill_workspace_processes if the ops server dies mid-test.
+                    cwd=self.root, env=self._env(), stdin=subprocess.DEVNULL, capture_output=True,
+                    text=True, timeout=TEST_TIMEOUT, preexec_fn=_limits)
+            except subprocess.TimeoutExpired:
+                return {"passed": False, "exit_code": None, "output": f"tests timed out after {TEST_TIMEOUT}s"}
         return {"passed": r.returncode == 0, "exit_code": r.returncode,
                 "output": _truncate(r.stdout + r.stderr)}
 

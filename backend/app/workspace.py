@@ -1,5 +1,6 @@
 """Per-run isolated workspaces created from the clean demo template + a failure scenario."""
 import json
+import os
 import re
 import shutil
 import uuid
@@ -32,10 +33,27 @@ def _missing_file(app: Path) -> None:
     (app / "data" / "items.json").rename(app / "data" / "items.json.bak")
 
 
+def _blind_incident(app: Path) -> None:
+    # Blind challenge: one inventory record's qty is stored as a string ("3" instead of 3).
+    # Targeted text edit so the file keeps its exact formatting, and the copied mtime is kept,
+    # so nothing in the workspace marks this file as the one that changed.
+    path = app / "data" / "items.json"
+    st = path.stat()
+    src = path.read_text()
+    old = '"sku": "B-200", "name": "Gadget", "qty": 3,'
+    broken = src.replace(old, old.replace('"qty": 3', '"qty": "3"'))
+    assert broken != src, "template changed; blind-incident scenario no longer applies"
+    path.write_text(broken)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+# The description is shown to the human operator only; the agent never receives it. The blind
+# scenario's id and description deliberately do not reveal the root cause.
 SCENARIOS: dict[str, tuple[str, Callable[[Path], None]]] = {
     "bad-config": ("Invalid value type in config.json", _bad_config),
     "code-bug": ("KeyError in inventory.total_value", _code_bug),
     "missing-file": ("Required data file missing", _missing_file),
+    "blind-incident": ("Undisclosed fault (blind challenge)", _blind_incident),
 }
 
 

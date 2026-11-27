@@ -13,6 +13,7 @@ const COPY: Record<string, ScenarioCopy> = {
   "code-bug": { title: "Code bug", subtitle: "Faulty change crashes the service", Icon: IconCode },
   "bad-config": { title: "Bad configuration", subtitle: "Invalid config blocks startup", Icon: IconSliders },
   "missing-file": { title: "Missing file", subtitle: "Required data file not in place", Icon: IconFileMissing },
+  "blind-incident": { title: "Blind challenge", subtitle: "Root cause not disclosed", Icon: IconBox },
 };
 
 export function scenarioCopy(id: string): ScenarioCopy {

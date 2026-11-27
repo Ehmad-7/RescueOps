@@ -206,8 +206,8 @@ def test_concurrent_limit_under_burst(tmp_path):
 def test_cancel_during_tool_execution_kills_everything(tmp_path):
     ws = create_workspace("code-bug", "slow", runs_dir=tmp_path)
     (ws / "inventory.py").write_text((ws / "inventory.py").read_text().replace('item["quantity"]', 'item["qty"]'))
-    (ws / "tests" / "test_slow.py").write_text(
-        "import time, unittest\nclass S(unittest.TestCase):\n    def test_slow(self):\n        time.sleep(30)\n")
+    # slow app module: the trusted tests import it, so run_tests blocks for 30s
+    (ws / "inventory.py").write_text("import sys, time\nif \"unittest\" in sys.modules:  # only under the test runner\n    time.sleep(30)\n" + (ws / "inventory.py").read_text())
     log = EventLog("c")
     model = ScriptedModel([resp(call("start_app")), resp(call("run_tests"))])
 
@@ -228,7 +228,7 @@ def test_cancel_during_tool_execution_kills_everything(tmp_path):
     time.sleep(0.5)
     assert no_app_running(ws)
     ps = __import__("subprocess").run(["ps", "-eo", "args"], capture_output=True, text=True).stdout
-    assert "unittest discover" not in ps and "server-filesystem" not in ps and "app.ops.server" not in ps
+    assert "rescueops-test-runner" not in ps and "server-filesystem" not in ps and "app.ops.server" not in ps
 
 
 # ------------------------------------------------------------------ security

@@ -78,10 +78,27 @@ def test_code_bug_detected_then_repaired(make_ops):
     assert ops.run_tests()["passed"] is True
 
 
-def test_child_env_is_scrubbed(make_ops, monkeypatch):
+def test_blind_incident_crashes_then_data_repair_recovers(make_ops):
+    ws, ops = make_ops("blind-incident")
+    r = ops.start_app()
+    assert r["ok"] is False and "TypeError" in r["log_tail"]
+    assert ops.run_health_check()["healthy"] is False
+    t = ops.run_tests()
+    assert t["passed"] is False and "test_state_builds" in t["output"]
+    data = ws / "data" / "items.json"
+    data.write_text(data.read_text().replace('"qty": "3"', '"qty": 3'))
+    assert ops.restart_app()["ok"] is True
+    assert ops.run_health_check()["healthy"] is True
+    assert ops.run_tests()["passed"] is True
+
+
+def test_child_env_is_scrubbed(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "secret-should-not-leak")
-    ws, ops = make_ops("code-bug")
-    (ws / "tests" / "test_env.py").write_text(
+    ws = create_workspace("code-bug", "env", runs_dir=tmp_path / "runs")
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    ops = OpsController(ws, tests_dir=trusted)
+    (trusted / "test_env.py").write_text(
         "import os, unittest\n"
         "class T(unittest.TestCase):\n"
         "    def test_env(self):\n"
@@ -89,6 +106,34 @@ def test_child_env_is_scrubbed(make_ops, monkeypatch):
     out = ops.run_tests()["output"]
     assert "test_env" in out and "secret-should-not-leak" not in out
     assert "test_env (test_env.T" in out and "ok" in out
+
+
+SHADOW = "import sys\nprint('OK (shadowed)')\nsys.exit(0)\n"
+
+
+def test_workspace_cannot_shadow_test_runner_or_replace_tests(make_ops):
+    # Regression: a workspace-level unittest package used to replace `python -m unittest`, and
+    # the workspace's own tests/ could be rewritten by the running app. Both must be ignored.
+    ws, ops = make_ops("code-bug")  # genuinely broken: total_value raises KeyError
+    (ws / "unittest").mkdir()
+    (ws / "unittest" / "__init__.py").write_text(SHADOW)
+    (ws / "unittest" / "__main__.py").write_text(SHADOW)
+    (ws / "json.py").write_text(SHADOW)  # stdlib shadow attempt (app.py imports json)
+    (ws / "tests" / "test_app.py").write_text(
+        "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
+    r = ops.run_tests()
+    assert r["passed"] is False and r["exit_code"] == 1, r
+    assert "shadowed" not in r["output"] and "test_state_builds" in r["output"] and "KeyError" in r["output"]
+    # the same workspace passes once the real bug is fixed, shadow files still present
+    (ws / "inventory.py").write_text((ws / "inventory.py").read_text().replace('item["quantity"]', 'item["qty"]'))
+    r = ops.run_tests()
+    assert r["passed"] is True and r["exit_code"] == 0 and "Ran 3 tests" in r["output"], r
+
+
+def test_trusted_tests_must_be_outside_workspace(make_ops):
+    ws, _ = make_ops("code-bug")
+    with pytest.raises(ValueError):
+        OpsController(ws, tests_dir=ws / "tests")
 
 
 def test_log_symlink_escape_blocked(make_ops, tmp_path):
@@ -142,7 +187,7 @@ def _procs(ws):
             found["server"] = (int(pid), int(pgid))
         elif args.endswith("-E -s app.py"):
             found.setdefault("app", []).append((int(pid), int(pgid)))
-        elif "unittest discover" in args and "ps -eo" not in args:
+        elif "rescueops-test-runner" in args and "ps -ww" not in args:
             found.setdefault("tests", []).append((int(pid), int(pgid)))
     return found
 
@@ -154,8 +199,8 @@ def _ours(entries, server_pgid):
 def _fixed_slow_ws(tmp_path, name):
     ws = create_workspace("code-bug", name, runs_dir=tmp_path)
     (ws / "inventory.py").write_text((ws / "inventory.py").read_text().replace('item["quantity"]', 'item["qty"]'))
-    (ws / "tests" / "test_slow.py").write_text(
-        "import time, unittest\nclass S(unittest.TestCase):\n    def test_slow(self):\n        time.sleep(20)\n")
+    # slow only when imported by the trusted test runner (app startup stays fast)
+    (ws / "inventory.py").write_text("import sys, time\nif \"unittest\" in sys.modules:  # only under the test runner\n    time.sleep(20)\n" + (ws / "inventory.py").read_text())
     return ws
 
 

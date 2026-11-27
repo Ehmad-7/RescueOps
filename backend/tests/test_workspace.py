@@ -29,6 +29,33 @@ def test_scenarios_actually_break_something(tmp_path):
     assert not (miss / "data" / "items.json").exists()
 
 
+def test_blind_incident_corrupts_only_one_field_in_the_copy(tmp_path):
+    tpl = TEMPLATE_DIR / "data" / "items.json"
+    tpl_bytes, tpl_mtime = tpl.read_bytes(), tpl.stat().st_mtime_ns
+    ws = create_workspace("blind-incident", "blind", runs_dir=tmp_path)
+    data = ws / "data" / "items.json"
+    items, clean = json.loads(data.read_text()), json.loads(tpl_bytes)
+    assert items[1]["sku"] == "B-200" and items[1]["qty"] == "3"  # string, not int
+    clean[1]["qty"] = "3"
+    assert items == clean  # nothing else changed
+    # same formatting (only the two quote characters added) and the template's mtime
+    assert data.read_text() == tpl_bytes.decode().replace('"qty": 3,', '"qty": "3",')
+    assert data.stat().st_mtime_ns == tpl_mtime
+    assert tpl.read_bytes() == tpl_bytes and tpl.stat().st_mtime_ns == tpl_mtime  # template untouched
+
+
+def test_blind_incident_leaves_no_trace_of_the_scenario_in_the_workspace(tmp_path):
+    ws = create_workspace("blind-incident", "blind", runs_dir=tmp_path)
+    names = {p.relative_to(ws) for p in ws.rglob("*")}
+    assert names == {p.relative_to(TEMPLATE_DIR) for p in TEMPLATE_DIR.rglob("*")
+                     if "__pycache__" not in p.parts and p.suffix != ".pyc" and "logs" not in p.parts}
+    desc = SCENARIOS["blind-incident"][0]
+    for p in ws.rglob("*"):
+        if p.is_file():
+            text = p.read_text(errors="ignore").lower()
+            assert "blind" not in text and desc.lower() not in text
+
+
 @pytest.mark.parametrize("bad", ["../x", "a/b", "", "A" * 3, "x" * 65])
 def test_rejects_bad_run_ids(tmp_path, bad):
     with pytest.raises(ValueError):
